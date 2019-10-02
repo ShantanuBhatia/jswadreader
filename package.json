@@ -1,0 +1,19 @@
+{
+  "name": "jswadreader",
+  "version": "1.0.0",
+  "description": "A webapp for viewing the contents of Doom WAD files.",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "doom",
+    "javascipt",
+    "wad",
+    "level",
+    "rip",
+    "tear"
+  ],
+  "author": "Shantanu Bhatia",
+  "license": "ISC"
+}
