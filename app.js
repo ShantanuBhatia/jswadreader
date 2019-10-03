@@ -1,22 +1,43 @@
+/*
+Note: the Unofficial Doom Spec being referred to throughout my code
+can be found at http://www.gamers.org/dhs/helpdocs/dmsp1666.html
+*/
+
 const fs = require('fs');
 const { promisify } = require("util");
 
-// TODO: replace with something a bit more substantial later
+// TODO: replace with command-line WAD loading
 const wadPath = "./doom1.wad"; // Rip and tear! :D
-
-
-const readMode = 'r'; // So we don't fuck up and write over the WAD file. Just easier to read than 'r'
+const readMode = 'r'; // So we don't fuck up and write over the WAD file. Easier to read than 'r'
 const dirEntrySize = 16;
 const headerSize = 12;
-// So we can use async/await
+
+
+// So we can use promises and async/await on file operations instead of getting into callback hell
 const read = promisify(fs.read);
 const openFile = promisify(fs.open);
 
-// let wad_header = {
-// 	"wad_type": "",
-// 	"no_of_lumps": 0,
-// 	"dir_offset": 0
-// };
+
+/*
+Returns JSON of the WAD's header data
+
+The first twelve bytes of the WAD file contain:
+four bytes of ASCII text saying if this is an IWAD or a PWAD
+four bytes of a little-endian long int telling how many lumps there are
+four bytes of a little-endian long int telling the offset from 
+	the start of the file to the beginning of the directory
+*/
+const getWadHeader = async (fd) => {
+	let buf = Buffer.alloc(headerSize);
+	let headerInfo = await read(fd, buf, 0, headerSize, 0);
+	//TODO: error if the file doesn't start with IWAD or PWAD
+	return ({
+		"wadType": headerInfo.buffer.toString('utf8', 0, 4),
+		"noOfLumps": headerInfo.buffer.readUInt32LE(4),
+		"dirOffset": headerInfo.buffer.readUInt32LE(8)
+	});
+}
+
 
 /*
 Returns JSON of a single lump's entry in the WAD directory. 
@@ -33,46 +54,58 @@ of three parts:
 	  For example, the "DEMO1" entry in hexadecimal would be
 	  (44 45 4D 4F 31 00 00 00)
 */
-// const readLump = async (fd, entryOffset){
-// 	let buf = Buffer.alloc(dirEntrySize);
-// 	let headerInfo = await read(fd, buf, entryOffset, dirEntrySize, 0);
-
-// }
-
-
-// /*
-// Returns a list of JSON objects for all entries in the WAD directory. 
-// */
-// const readWadDirectory = async (fd, wadHeader) {
-// 	console.log("TODO");
-// }
-
+const readDirEntry = async (fd, entryOffset) => {
+	let buf = Buffer.alloc(dirEntrySize);
+	let dirEntryObj = await read(fd, buf, 0, dirEntrySize, entryOffset);
+	let dirEntry = {
+		"lumpStartOffset": dirEntryObj.buffer.readUInt32LE(0),
+		"lumpSize": dirEntryObj.buffer.readUInt32LE(4),
+		// the name string is zero-padded, and JS wants to show the zeroes as the \u0000 character
+		// but we don't want that, and trim() doesn't get rid of them, so we regex them away
+		"lumpName": dirEntryObj.buffer.toString('utf8', 8, 16).replace(/\0/g, '')
+	}
+	return dirEntry;
+}
 
 
 /*
-Returns JSON of the WAD's header data
-
-The first twelve bytes of the WAD file contain:
-four bytes of ASCII text saying if this is an IWAD or a PWAD
-four bytes of a little-endian long int telling how many lumps there are
-four bytes of a little-endian long int telling the offset from the start of the file to the beginning of the directory
+Returns a array of JSON objects for all entries in the WAD directory. 
+Start at the directory starting offset
 */
-async function getWadHeader(fd) {
-	let buf = Buffer.alloc(headerSize);
-	let headerInfo = await read(fd, buf, 0, headerSize, 0);
-	//TODO: error if the file doesn't start with IWAD or PWAD
-	return ({
-		"wad_type": headerInfo.buffer.toString('utf8', 0, 4),
-		"no_of_lumps": headerInfo.buffer.readUInt32LE(4),
-		"dir_offset": headerInfo.buffer.readUInt32LE(8)
-	});
+const readWadDirectory = async (fd, wadHeader) =>  {
+	let indices = [...Array(wadHeader.noOfLumps).keys()];
+	return Promise.all(
+		indices.map( async (x) => { 
+			const entry = await readDirEntry(fd, wadHeader.dirOffset+(x*dirEntrySize));
+			return entry;
+		})
+	);
 }
 
-async function main() {
+
+/*
+From the Unofficial Doom Spec Each level has eleven directory entries and ten lumps: 
+	E[x]M[y] (orMAPxy in a DOOM 2 wad), THINGS, LINEDEFS, SIDEDEFS, VERTEXES, SEGS,
+	SSECTORS, NODES, SECTORS, REJECT, and BLOCKMAP.
+
+*/
+
+
+
+
+
+
+// TODO: reject running if the file provided is not a WAD
+const main = async () => {
 	let fd = await openFile(wadPath, readMode);
 	console.log(`WAD file has been opened at fd ${fd}`);
 	let doomWadHeader = await getWadHeader(fd);
 	console.log(JSON.stringify(doomWadHeader));
+	let firstDirEntry = await readDirEntry(fd, (doomWadHeader.dirOffset));
+	console.log(JSON.stringify(firstDirEntry));
+	let x = await readWadDirectory(fd, doomWadHeader);
+	console.log(x.length);
+
 }
 
 

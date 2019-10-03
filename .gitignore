@@ -97,3 +97,6 @@ public
 # DynamoDB Local files
 .dynamodb/
 
+# Project-specific files
+*.wad
+notes.txt
