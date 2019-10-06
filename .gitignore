@@ -100,3 +100,5 @@ public
 # Project-specific files
 *.wad
 notes.txt
+*.pdf
+

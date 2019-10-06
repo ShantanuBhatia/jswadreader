@@ -20,6 +20,7 @@ const openFile = promisify(fs.open);
 
 /*
 Returns JSON of the WAD's header data
+fd: file descriptor of wad file
 
 The first twelve bytes of the WAD file contain:
 four bytes of ASCII text saying if this is an IWAD or a PWAD
@@ -47,12 +48,11 @@ offset: offset from start of file at which this directory entry starts
 From the unofficial Doom Specs:
 The directory has one 16-byte entry for every lump. Each entry consists
 of three parts:
-
     (a) a long integer, the file offset to the start of the lump
     (b) a long integer, the size of the lump in bytes
     (c) an 8-byte ASCII string, the name of the lump, padded with zeros.
-	  For example, the "DEMO1" entry in hexadecimal would be
-	  (44 45 4D 4F 31 00 00 00)
+	  	For example, the "DEMO1" entry in hexadecimal would be
+	  	(44 45 4D 4F 31 00 00 00)
 */
 const readDirEntry = async (fd, entryOffset) => {
 	let buf = Buffer.alloc(dirEntrySize);
@@ -70,7 +70,11 @@ const readDirEntry = async (fd, entryOffset) => {
 
 /*
 Returns a array of JSON objects for all entries in the WAD directory. 
-Start at the directory starting offset
+fd: file descriptor of wad file
+wadHeader: JSON object created by getWadHeader() describing wad type, lump count, and directory offset.
+
+Starting at the directory starting offset, create entries for each 16-byte directory item. 
+List them and return the list.
 */
 const readWadDirectory = async (fd, wadHeader) =>  {
 	let indices = [...Array(wadHeader.noOfLumps).keys()];
@@ -87,9 +91,8 @@ const readWadDirectory = async (fd, wadHeader) =>  {
 From the Unofficial Doom Spec Each level has eleven directory entries and ten lumps: 
 	E[x]M[y] (orMAPxy in a DOOM 2 wad), THINGS, LINEDEFS, SIDEDEFS, VERTEXES, SEGS,
 	SSECTORS, NODES, SECTORS, REJECT, and BLOCKMAP.
-
 */
-
+ const 
 
 
 
@@ -104,7 +107,7 @@ const main = async () => {
 	let firstDirEntry = await readDirEntry(fd, (doomWadHeader.dirOffset));
 	console.log(JSON.stringify(firstDirEntry));
 	let x = await readWadDirectory(fd, doomWadHeader);
-	console.log(x.length);
+	// console.log(x.length);
 
 }
 
