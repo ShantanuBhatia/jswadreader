@@ -14,6 +14,10 @@ Before you start reading:
 	And if there is something you can teach me, I'd love for you to share :)
 */
 
+"use strict";
+
+
+
 const fs = require('fs');
 const express = require('express');
 const { promisify } = require("util");
@@ -23,7 +27,10 @@ const wadPath = "./doom1.wad"; // Rip and tear! :D
 const readMode = 'r'; // So we don't mess up and write over the WAD file. Easier to read than 'r'
 const dirEntrySize = 16;
 const headerSize = 12;
-
+const itemSizes = {
+	"THING":10,
+	"LINEDEF":14
+}
 
 // So we can use promises and async/await on file operations instead of getting into callback hell
 const read = promisify(fs.read);
@@ -35,7 +42,7 @@ Every great game should have an awful ASCII art title header
 This ASCII art for the heading "ShantyDoom" comtains both backtick ` and backslash \ characters.
 Both of these have been be escaped w/ backslashes to render correctly.
 */
-titleText = `  _________.__                   __           ________                         
+const titleText = `  _________.__                   __           ________                         
  /   _____/|  |__ _____    _____/  |_ ___.__. \\______ \\   ____   ____   _____  
  \\_____  \\ |  |  \\\\__  \\  /    \\   __<   |  |  |    |  \\ /  _ \\ /  _ \\ /     \\ 
  /        \\|   Y  \\/ __ \\|   |  \\  |  \\___  |  |    \`   (  <_> |  <_> )  Y Y  \\
@@ -145,56 +152,55 @@ From the Unofficial Doom Spec Each level has eleven directory entries and ten lu
  }
 
 
-const readTHINGS = async (fd, THINGS_entry) => {
-	let buf = Buffer.alloc(THINGS_entry.lumpSize);
-	let thingCount = THINGS_entry.lumpSize / 10;
+/*
+---------------------------------
+LEVEL DATA READER FUNCTIONS START
+---------------------------------
 
-	console.log(`SIZE: ${THINGS_entry.lumpSize}. No of sectors: ${thingCount}`);
-	return 5;
-	// // read into the buffer the entire lump
-	let thingLump = await read(fd, buf, 0, THINGS_entry.lumpSize, THINGS_entry.lumpStartOffset);
+These functions return arrays of the actual data in a level's lumps, as pointed to by the level's eleven lumps
+Each of these functions takes two parameters: 
+	fd: file descriptor of the WAD file
+	{}_entry: the relevant directory entry
 
-	let THINGS = [];
-	for(let i = 0; i < thingCount; i++){
-		THINGS.push({
-			"x_pos": thingLump.buffer.readInt16LE((i*7)),
-			"y_pos": thingLump.buffer.readInt16LE((i*7)+2),
-			"angle": thingLump.buffer.readInt16LE((i*7)+4),
-			"type": thingLump.buffer.readInt16LE((i*7)+6),
-			"options": thingLump.buffer.readInt16LE((i*7)+8)
-		});
-	}
-	return THINGS;
-}
+They will all return arrays of JSON objects representing all the objects of that type contains in that level.
+	i.e, readTHINGS returns an array of THING objects, readLINEDEFS an array of LINEDEF objects etc
+*/
 
 
 /*
-Returns an array of JSON objects representing the LINEDEFS in the lump whose directory entry we pass in
-
-fd: WAD's file descriptor
-LINEDEFS_entry: JSON object of LINEDEFS lump directory entry
-From the Unofficial Doom Specs:
-
-Each linedef represents a line from one of the VERTEXES to another,
-and each linedef's record is 14 bytes, containing 7 <short> fields:
-
-	(1) from the VERTEX with this number (the first vertex is 0).
-	(2) to the VERTEX with this number (31 is the 32nd vertex).
-	(3) flags, see [4-3-1] below.
-	(4) types, see [4-3-2] below.
-	(5) is a "tag" or "trigger" number which ties this line's effect type
-	      to all SECTORS that have the same tag number (in their last
-	      field).
-	(6) number of the "right" SIDEDEF for this linedef.
-	(7) "left" SIDEDEF, if this line adjoins 2 SECTORS. Otherwise, it is
-	      equal to -1 (FFFF hex).
-
+Each THING is ten bytes long, consisiting of five short fields
+TODO: add the comments explaining each of these
 */
-const readLINEDEFS = async (fd, LINEDEFS_entry) => {
-	let buf = Buffer.alloc(LINEDEFS_entry.lumpSize);
-	let linedefCount = LINEDEFS_entry.lumpSize / 14;
+const readTHINGS = async (fd, THINGS_entry) => {
+	const ts = itemSizes.THING; // thing size
+	let buf = Buffer.alloc(THINGS_entry.lumpSize);
+	let thingCount = THINGS_entry.lumpSize / ts;
 
-	console.log(`SIZE: ${LINEDEFS_entry.lumpSize}. No of sectors: ${linedefCount}`);
+	console.log(`SIZE: ${THINGS_entry.lumpSize}. No of things: ${thingCount}. Starting offset: ${THINGS_entry.lumpStartOffset}`);
+	// // read into the buffer the entire lump
+	let thingLump = await read(fd, buf, 0, THINGS_entry.lumpSize, THINGS_entry.lumpStartOffset);
+
+	let THINGS_arr = [];
+	for(let i = 0; i < thingCount; i++){
+		THINGS_arr.push({
+			"x_pos": thingLump.buffer.readInt16LE((i*ts)),
+			"y_pos": thingLump.buffer.readInt16LE((i*ts)+2),
+			"angle": thingLump.buffer.readInt16LE((i*ts)+4),
+			"type": thingLump.buffer.readInt16LE((i*ts)+6),
+			"options": thingLump.buffer.readInt16LE((i*ts)+8)
+		});
+	}
+	return THINGS_arr;
+}
+
+
+
+const readLINEDEFS = async (fd, LINEDEFS_entry) => {
+	const lds = itemSizes.LINEDEF; // Linedef size
+	let buf = Buffer.alloc(LINEDEFS_entry.lumpSize);
+	let linedefCount = LINEDEFS_entry.lumpSize / lds;
+
+	console.log(`SIZE: ${LINEDEFS_entry.lumpSize}. No of linedefs: ${linedefCount}. Starting offset: ${LINEDEFS_entry.lumpStartOffset}`);
 	
 	// read into the buffer the entire lump
 	let linedefLump = await read(fd, buf, 0, LINEDEFS_entry.lumpSize, LINEDEFS_entry.lumpStartOffset);
@@ -202,27 +208,33 @@ const readLINEDEFS = async (fd, LINEDEFS_entry) => {
 	let LINEDEFS = [];
 	for(let i = 0; i < linedefCount; i++){
 		LINEDEFS.push({
-			"FROM_vertex": linedefLump.buffer.readInt16LE((i*7)),
-			"TO_vertex": linedefLump.buffer.readInt16LE((i*7)+2),
-			"flags1": linedefLump.buffer.readInt16LE((i*7)+4),
-			"flags2": linedefLump.buffer.readInt16LE((i*7)+6),
-			"tag": linedefLump.buffer.readInt16LE((i*7)+8),
-			"rightSideNo": linedefLump.buffer.readInt16LE((i*7)+10),
-			"leftSideNo": linedefLump.buffer.readInt16LE((i*7)+12)
+			"FROM_vertex": linedefLump.buffer.readInt16LE((i*lds)),
+			"TO_vertex": linedefLump.buffer.readInt16LE((i*lds)+2),
+			"flags1": linedefLump.buffer.readInt16LE((i*lds)+4),
+			"flags2": linedefLump.buffer.readInt16LE((i*lds)+6),
+			"tag": linedefLump.buffer.readInt16LE((i*lds)+8),
+			"rightSideNo": linedefLump.buffer.readInt16LE((i*lds)+10),
+			"leftSideNo": linedefLump.buffer.readInt16LE((i*lds)+12)
 
 		});
 	}
 	return LINEDEFS;
 }
 
+/*
+--------------------------------
+LEVEL DATA READER FUNCTIONS STOP
+--------------------------------
+*/
+
 
 
 
 const constructLevel = async (fd, levelJSON) => {
-	let tmp = await readLINEDEFS(fd, levelJSON.LINEDEFS_entry);
-	console.log(JSON.stringify(tmp[0]));
-	let tmp2 = await readTHINGS(fd, levelJSON.THINGS_entry);
-	console.log(JSON.stringify(tmp2[0u]));
+	let levelThings = await readTHINGS(fd, levelJSON.THINGS_entry);
+	console.log(JSON.stringify(levelThings[6]));
+	let levelLinedefs = await readLINEDEFS(fd, levelJSON.LINEDEFS_entry);
+	console.log(JSON.stringify(levelLinedefs[6]));
 
 }
 
@@ -239,7 +251,7 @@ const main = async () => {
 	let doomWadHeader = await getWadHeader(fd);
 	console.log(JSON.stringify(doomWadHeader));
 	let x = await readWadDirectory(fd, doomWadHeader);
-	console.log(JSON.stringify(x[0]));
+	console.log(JSON.stringify(x[2]));
 	let y = getAllMaps(x);
 	constructLevel(fd, y[0]);
 
