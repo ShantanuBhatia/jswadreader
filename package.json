@@ -15,5 +15,8 @@
     "tear"
   ],
   "author": "Shantanu Bhatia",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.17.1"
+  }
 }
