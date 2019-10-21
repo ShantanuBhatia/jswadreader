@@ -25,11 +25,20 @@ const { promisify } = require("util");
 // TODO: eventually replace with command-line WAD loading
 const wadPath = "./doom1.wad"; // Rip and tear! :D
 const readMode = 'r'; // So we don't mess up and write over the WAD file. Easier to read than 'r'
-const dirEntrySize = 16;
-const headerSize = 12;
+// const dirEntrySize = 16;
+
 const itemSizes = {
+	"header": 12,
+	"directoryEntry":16,
 	"THING":10,
-	"LINEDEF":14
+	"LINEDEF":14,
+	"SIDEDEF":30,
+	"VERTEX": 4,
+	"SEG": 12,
+	"SSECTOR":4,
+	"NODE": 28,
+	"SECTOR": 26,
+	
 }
 
 // So we can use promises and async/await on file operations instead of getting into callback hell
@@ -61,8 +70,8 @@ four bytes of a little-endian long int telling the offset from
 	the start of the file to the beginning of the directory
 */
 const getWadHeader = async (fd) => {
-	let buf = Buffer.alloc(headerSize);
-	let headerInfo = await read(fd, buf, 0, headerSize, 0);
+	let buf = Buffer.alloc(itemSizes.header);
+	let headerInfo = await read(fd, buf, 0, itemSizes.header, 0);
 	//TODO: error if the file doesn't start with IWAD or PWAD
 	return ({
 		"wadType": headerInfo.buffer.toString('utf8', 0, 4),
@@ -87,8 +96,8 @@ of three parts:
 	  	(44 45 4D 4F 31 00 00 00)
 */
 const readDirEntry = async (fd, entryOffset) => {
-	let buf = Buffer.alloc(dirEntrySize);
-	let dirEntryObj = await read(fd, buf, 0, dirEntrySize, entryOffset);
+	let buf = Buffer.alloc(itemSizes.directoryEntry);
+	let dirEntryObj = await read(fd, buf, 0, itemSizes.directoryEntry, entryOffset);
 	let dirEntry = {
 		"lumpStartOffset": dirEntryObj.buffer.readUInt32LE(0),
 		"lumpSize": dirEntryObj.buffer.readUInt32LE(4),
@@ -112,7 +121,7 @@ const readWadDirectory = async (fd, wadHeader) =>  {
 	let indices = [...Array(wadHeader.noOfLumps).keys()];
 	return Promise.all(
 		indices.map( async (x) => { 
-			const entry = await readDirEntry(fd, wadHeader.dirOffset+(x*dirEntrySize));
+			const entry = await readDirEntry(fd, wadHeader.dirOffset+(x*itemSizes.directoryEntry));
 			return entry;
 		})
 	);
@@ -221,6 +230,186 @@ const readLINEDEFS = async (fd, LINEDEFS_entry) => {
 	return LINEDEFS;
 }
 
+
+/*
+Each sidedef's record is 30 bytes, comprising 2 <short> fields, then
+3 <8-byte string> fields, then a final <short> field
+As always, we regex away trailing \u0000 characters from strings
+*/
+const readSIDEDEFS = async (fd, SIDEDEFS_entry) => {
+	const sds = itemSizes.SIDEDEF; // Sidedef size
+	let buf = Buffer.alloc(SIDEDEFS_entry.lumpSize);
+	let sidedefCount = SIDEDEFS_entry.lumpSize / sds;
+
+	console.log(`SIZE: ${SIDEDEFS_entry.lumpSize}. No of sidedefs: ${sidedefCount}. Starting offset: ${SIDEDEFS_entry.lumpStartOffset}`);
+	
+	// read into the buffer the entire lump
+	let sidedefLump = await read(fd, buf, 0, SIDEDEFS_entry.lumpSize, SIDEDEFS_entry.lumpStartOffset);
+
+	let SIDEDEFS = [];
+	for(let i = 0; i < sidedefCount; i++){
+		SIDEDEFS.push({
+			"x_offset": sidedefLump.buffer.readInt16LE((i*sds)),
+			"y_offset": sidedefLump.buffer.readInt16LE((i*sds)+2),
+			"upper_tex_name": sidedefLump.buffer.toString('utf8', (i*sds)+4, (i*sds)+12).replace(/\0/g, ''), 
+			"lower_tex_name": sidedefLump.buffer.toString('utf8', (i*sds)+12, (i*sds)+20).replace(/\0/g, ''),
+			"middle_tex_name": sidedefLump.buffer.toString('utf8', (i*sds)+20, (i*sds)+28).replace(/\0/g, ''),
+			"facing_sector": sidedefLump.buffer.readInt16LE((i*sds)+28),
+		});
+	}
+	return SIDEDEFS;
+
+
+
+}
+
+/*
+Dead simple: a vertex is two shorts, an x and a y
+*/
+const readVERTEXES = async (fd, VERTEXES_entry) => {
+	const vs = itemSizes.VERTEX; // vertex size
+	let buf = Buffer.alloc(VERTEXES_entry.lumpSize);
+	let vertexCount = VERTEXES_entry.lumpSize / vs;
+
+	console.log(`SIZE: ${VERTEXES_entry.lumpSize}. No of vertexes: ${vertexCount}. Starting offset: ${VERTEXES_entry.lumpStartOffset}`);
+	
+	// read into the buffer the entire lump
+	let vertexLump = await read(fd, buf, 0, VERTEXES_entry.lumpSize, VERTEXES_entry.lumpStartOffset);
+
+	let VERTEXES = [];
+	for(let i = 0; i < vertexCount; i++){
+		VERTEXES.push({
+			"x": vertexLump.buffer.readInt16LE((i*vs)),
+			"y": vertexLump.buffer.readInt16LE((i*vs)+2)
+		});
+	}
+	return VERTEXES;
+}
+
+const readSEGS = async (fd, SEGS_entry) => {
+	const ss = itemSizes.SEG;
+	let buf = Buffer.alloc(SEGS_entry.lumpSize);
+	let itemCount = SEGS_entry.lumpSize / ss;
+
+	console.log(`SIZE: ${SEGS_entry.lumpSize}. No of SEGS: ${itemCount}. Starting offset: ${SEGS_entry.lumpStartOffset}`);
+	
+	// read into the buffer the entire lump
+	let segsLump = await read(fd, buf, 0, SEGS_entry.lumpSize, SEGS_entry.lumpStartOffset);
+	let SEGS = [];
+	for(let i = 0; i < itemCount; i++){
+		SEGS.push({
+			"start_VERTEX": segsLump.buffer.readInt16LE((i*ss)),
+			"end_VERTEX": segsLump.buffer.readInt16LE((i*ss)+2),
+			"angle": segsLump.buffer.readInt16LE((i*ss)+4),
+			"LINEDEF": segsLump.buffer.readInt16LE((i*ss)+6),
+			"direction": segsLump.buffer.readInt16LE((i*ss)+8),
+			"offset": segsLump.buffer.readInt16LE((i*ss)+10)
+		});
+	}
+	// console.log(SEGS.length);
+	return SEGS;
+}
+
+const readSSECTORS = async (fd, SSECTORS_entry) => {
+	const ss = itemSizes.SSECTOR;
+	let buf = Buffer.alloc(SSECTORS_entry.lumpSize);
+	let itemCount = SSECTORS_entry.lumpSize / ss;
+
+	console.log(`SIZE: ${SSECTORS_entry.lumpSize}. No of SSECTORS: ${itemCount}. Starting offset: ${SSECTORS_entry.lumpStartOffset}`);
+	
+	// read into the buffer the entire lump
+	let ssectorsLump = await read(fd, buf, 0, SSECTORS_entry.lumpSize, SSECTORS_entry.lumpStartOffset);
+	let SSECTORS = [];
+	for(let i = 0; i < itemCount; i++){
+		SSECTORS.push({
+			"SEGS_count": ssectorsLump.buffer.readInt16LE((i*ss)),
+			"starting_SEG": ssectorsLump.buffer.readInt16LE((i*ss)+2),
+
+		});
+	}
+	// console.log(SEGS.length);
+	return SSECTORS;
+}
+
+const readNODES = async (fd, NODES_entry) => {
+	const ns = itemSizes.NODE;
+	let buf = Buffer.alloc(NODES_entry.lumpSize);
+	let itemCount = NODES_entry.lumpSize / ns;
+
+	console.log(`SIZE: ${NODES_entry.lumpSize}. No of SSECTORS: ${itemCount}. Starting offset: ${NODES_entry.lumpStartOffset}`);
+	
+	// read into the buffer the entire lump
+	let nodesLump = await read(fd, buf, 0, NODES_entry.lumpSize, NODES_entry.lumpStartOffset);
+	let NODES = [];
+	for(let i = 0; i < itemCount; i++){
+		NODES.push({
+			"paritionline_start_x": nodesLump.buffer.readInt16LE((i*ns)),
+			"paritionline_start_y": nodesLump.buffer.readInt16LE((i*ns)+2),
+			"dx": nodesLump.buffer.readInt16LE((i*ns)+4),
+			"dy": nodesLump.buffer.readInt16LE((i*ns)+6),
+			"right_bb_y_ub": nodesLump.buffer.readInt16LE((i*ns)+8),
+			"right_bb_y_lb": nodesLump.buffer.readInt16LE((i*ns)+10),
+			"right_bb_x_lb": nodesLump.buffer.readInt16LE((i*ns)+12),
+			"right_bb_x_ub": nodesLump.buffer.readInt16LE((i*ns)+14),
+			"left_bb_y_ub": nodesLump.buffer.readInt16LE((i*ns)+16),
+			"left_bb_y_lb": nodesLump.buffer.readInt16LE((i*ns)+18),
+			"left_bb_x_lb": nodesLump.buffer.readInt16LE((i*ns)+20),
+			"left_bb_x_ub": nodesLump.buffer.readInt16LE((i*ns)+22),
+			"right_child_node": nodesLump.buffer.readInt16LE((i*ns)+24),
+			"left_child_node": nodesLump.buffer.readInt16LE((i*ns)+26),
+
+		});
+	}
+	// console.log(SEGS.length);
+	return NODES;
+}
+
+const readSECTORS = async (fd, SECTORS_entry) => {
+	const ss = itemSizes.SECTOR;
+	let buf = Buffer.alloc(SECTORS_entry.lumpSize);
+	let itemCount = SECTORS_entry.lumpSize / ss;
+
+	console.log(`SIZE: ${SECTORS_entry.lumpSize}. No of SECTORS: ${itemCount}. Starting offset: ${SECTORS_entry.lumpStartOffset}`);
+	
+	// read into the buffer the entire lump
+	let nodesLump = await read(fd, buf, 0, SECTORS_entry.lumpSize, SECTORS_entry.lumpStartOffset);
+	let SECTORS = [];
+	for(let i = 0; i < itemCount; i++){
+		SECTORS.push({
+			"floor_height": nodesLump.buffer.readInt16LE((i*ss)),
+			"ceiling_height": nodesLump.buffer.readInt16LE((i*ss)+2),
+			"floor_tex_name": nodesLump.buffer.toString('utf8', (i*ss)+4, (i*ss)+12).replace(/\0/g, ''), 
+			"ceiling_tex_name": nodesLump.buffer.toString('utf8', (i*ss)+12, (i*ss)+20).replace(/\0/g, ''),
+			"light_level": nodesLump.buffer.readInt16LE((i*ss)+20),
+			"special_sector": nodesLump.buffer.readInt16LE((i*ss)+22),
+			"tag_number": nodesLump.buffer.readInt16LE((i*ss)+22),
+
+		});
+	}
+	// cossole.log(SEGS.length);
+	return SECTORS;
+}
+
+const readREJECT = async (fd, REJECT_entry, SECTORS_entry, BLOCKMAP_entry) => {
+	const sectorCount = SECTORS_entry.lumpSize / itemSizes.SECTOR;
+	
+	let indices = [...Array(sectorCount).keys()];
+	let REJECT_calculatedSize = ((sectorCount*sectorCount) % 8 == 0) ? (sectorCount*sectorCount)/8 : (Math.floor((sectorCount*sectorCount)/8)) + 1;
+
+	// let REJECT_calculatedSize = (Math.floor((sectorCount*sectorCount)/8) == ((sectorCount*sectorCount)/8)? (Math.floor((sectorCount*sectorCount)/8)) : (Math.floor((sectorCount*sectorCount)/8) + 1);
+
+	
+	console.log(`expected REJECT size: ${REJECT_calculatedSize}. Actual REJECT size: ${BLOCKMAP_entry.lumpStartOffset - REJECT_entry.lumpStartOffset}`);
+	
+	let BLOCKMAP = Array(sectorCount).fill(0,0,sectorCount).map((item)=>{return Array(sectorCount).fill(0,0,sectorCount)});
+
+
+	console.log(BLOCKMAP['5'].length);
+	// let blockmapLump = await read(fd, buf, 0, BLOCKMAP_entry.lumpSize, BLOCKMAP_entry.lumpStartOffset);
+	return 5;
+}
+
+
 /*
 --------------------------------
 LEVEL DATA READER FUNCTIONS STOP
@@ -232,10 +421,22 @@ LEVEL DATA READER FUNCTIONS STOP
 
 const constructLevel = async (fd, levelJSON) => {
 	let levelThings = await readTHINGS(fd, levelJSON.THINGS_entry);
-	console.log(JSON.stringify(levelThings[6]));
+	// console.log(JSON.stringify(levelThings[0]));
 	let levelLinedefs = await readLINEDEFS(fd, levelJSON.LINEDEFS_entry);
-	console.log(JSON.stringify(levelLinedefs[6]));
-
+	// console.log(JSON.stringify(levelLinedefs[0]));
+	let levelSidedefs = await readSIDEDEFS(fd, levelJSON.SIDEDEFS_entry);
+	// console.log(JSON.stringify(levelSidedefs[0]));
+	let levelVertexes = await readVERTEXES(fd, levelJSON.VERTEXES_entry);
+	// console.log(JSON.stringify(levelVertexes[0]));
+	let levelSegs = await readSEGS(fd, levelJSON.SEGS_entry);
+	// console.log(JSON.stringify(levelSegs[0]));
+	let levelSsectors = await readSSECTORS(fd, levelJSON.SSECTORS_entry);
+	// console.log(JSON.stringify(levelSsectors[0]));
+	let levelNodes = await readNODES(fd, levelJSON.NODES_entry);
+	// console.log(JSON.stringify(levelNodes[6]));
+	let levelSectors = await readSECTORS(fd, levelJSON.SECTORS_entry);
+	// console.log(JSON.stringify(levelSectors[10]));
+	let tmp = await readREJECT(fd, levelJSON.REJECT_entry, levelJSON.SECTORS_entry, levelJSON.BLOCKMAP_entry);
 }
 
 
@@ -253,7 +454,8 @@ const main = async () => {
 	let x = await readWadDirectory(fd, doomWadHeader);
 	console.log(JSON.stringify(x[2]));
 	let y = getAllMaps(x);
-	constructLevel(fd, y[0]);
+	let e1m2 = y[1]
+	constructLevel(fd, e1m2);
 
 }
 
