@@ -390,7 +390,7 @@ const readSECTORS = async (fd, SECTORS_entry) => {
 	return SECTORS;
 }
 
-const readREJECT = async (fd, REJECT_entry, SECTORS_entry, BLOCKMAP_entry) => {
+const readREJECT = async (fd, REJECT_entry, SECTORS_entry) => {
 	const sectorCount = SECTORS_entry.lumpSize / itemSizes.SECTOR;
 	
 	let indices = [...Array(sectorCount).keys()];
@@ -398,14 +398,16 @@ const readREJECT = async (fd, REJECT_entry, SECTORS_entry, BLOCKMAP_entry) => {
 
 	// let REJECT_calculatedSize = (Math.floor((sectorCount*sectorCount)/8) == ((sectorCount*sectorCount)/8)? (Math.floor((sectorCount*sectorCount)/8)) : (Math.floor((sectorCount*sectorCount)/8) + 1);
 
-	
-	console.log(`expected REJECT size: ${REJECT_calculatedSize}. Actual REJECT size: ${BLOCKMAP_entry.lumpStartOffset - REJECT_entry.lumpStartOffset}`);
-	
-	let BLOCKMAP = Array(sectorCount).fill(0,0,sectorCount).map((item)=>{return Array(sectorCount).fill(0,0,sectorCount)});
+	console.log(`REJECT size: ${REJECT_calculatedSize} bytes for ${sectorCount} sectors.`);	
+	let REJECT = Array(sectorCount).fill(0,0,sectorCount).map((item)=>{return Array(sectorCount).fill(0,0,sectorCount)});
 
-
-	console.log(BLOCKMAP['5'].length);
-	// let blockmapLump = await read(fd, buf, 0, BLOCKMAP_entry.lumpSize, BLOCKMAP_entry.lumpStartOffset);
+	let buf = Buffer.alloc(REJECT_entry.lumpSize);
+	let rejectLump = await read(fd, buf, 0, REJECT_entry.lumpSize, REJECT_entry.lumpStartOffset);
+	
+	let readBits = 0;
+	while (readBits < sectorCount*sectorCount){
+		
+	}
 	return 5;
 }
 
@@ -436,7 +438,7 @@ const constructLevel = async (fd, levelJSON) => {
 	// console.log(JSON.stringify(levelNodes[6]));
 	let levelSectors = await readSECTORS(fd, levelJSON.SECTORS_entry);
 	// console.log(JSON.stringify(levelSectors[10]));
-	let tmp = await readREJECT(fd, levelJSON.REJECT_entry, levelJSON.SECTORS_entry, levelJSON.BLOCKMAP_entry);
+	let tmp = await readREJECT(fd, levelJSON.REJECT_entry, levelJSON.SECTORS_entry);
 }
 
 
